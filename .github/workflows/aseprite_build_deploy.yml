@@ -19,8 +19,9 @@ jobs:
 
     steps:
       - name: Install build tools
+        shell: bash
         run: |
-          brew install ninja cmake
+          brew install ninja cmake || true
 
       - name: Find latest Aseprite release
         id: version
@@ -37,14 +38,28 @@ jobs:
           cd aseprite
           git submodule update --init --recursive
 
-      - name: Build native Apple Silicon version
+      - name: Download matching Skia
         shell: bash
         run: |
           cd aseprite
-          chmod +x build.sh
-          ./build.sh --auto --norun
+          SKIA_URL=$(bash laf/misc/skia-url.sh Release | xargs)
+          SKIA_FILE=$(basename "$SKIA_URL")
+          echo "Using $SKIA_URL"
+          curl --ssl-revoke-best-effort -L -o "$SKIA_FILE" "$SKIA_URL"
+          mkdir -p skia
+          unzip -q "$SKIA_FILE" -d skia
 
-      - name: Show built files
+      - name: Configure native M1 build
+        shell: bash
+        run: |
+          cmake -S aseprite -B aseprite/build -G Ninja             -DCMAKE_BUILD_TYPE=RelWithDebInfo             -DCMAKE_OSX_ARCHITECTURES=arm64             -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0             -DENABLE_SCRIPTING=ON             -DLAF_BACKEND=skia             -DSKIA_DIR="$GITHUB_WORKSPACE/aseprite/skia"             -DSKIA_LIBRARY_DIR="$GITHUB_WORKSPACE/aseprite/skia/out/Release-arm64"
+
+      - name: Compile Aseprite
+        shell: bash
+        run: |
+          cmake --build aseprite/build --target aseprite --parallel 3
+
+      - name: Verify build
         shell: bash
         run: |
           file aseprite/build/bin/aseprite
@@ -53,7 +68,7 @@ jobs:
       - name: Upload Aseprite
         uses: actions/upload-artifact@v4
         with:
-          name: Aseprite-${{ steps.version.outputs.tag }}-Mac-Apple-Silicon
+          name: Aseprite-${{ steps.version.outputs.tag }}-Mac-M1
           path: aseprite/build/bin/
           if-no-files-found: error
           retention-days: 7
